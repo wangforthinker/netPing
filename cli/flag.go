@@ -49,4 +49,19 @@ var(
 		Usage:"label value to connect",
 		EnvVar: env.CONNECT_CONTAINER_LABEL_VALUE,
 	}
+
+	fLogServer = cli.StringFlag{
+		Name: "logServer",
+		Usage:"log server addr",
+		EnvVar: env.LOG_SERVER_ADDR,
+	}
+
+	fHost = cli.StringFlag{
+		Name: "host",
+		Usage:"server host,(0.0.0.0:11999)",
+		EnvVar: env.SERVER_HOST,
+		Value: "0.0.0.0:11999",
+	}
+
+
 )

@@ -4,9 +4,9 @@ BUILD_IMAGE   = golang:1.7.5
 PROJECT_NAME  = netPing
 
 GROUP_NAME     = acs
-TARGET         = netPing
+TARGET         = netping
 IMAGE_NAME     = $(GROUP_NAME)/$(TARGET)
-MAJOR_VERSION = $(shell cat VERSION)
+MAJOR_VERSION = 1.0.0
 DATE = $(shell date +%Y%m%d)
 
 MAJOR_VERSION = $(shell cat VERSION)

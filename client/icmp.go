@@ -7,6 +7,8 @@ import (
 	"time"
 	"golang.org/x/net/ipv4"
 	"sync"
+	"github.com/wangforthinker/netPing/utils"
+	"fmt"
 )
 
 const(
@@ -42,6 +44,7 @@ type IcmpClient struct {
 	recvHandle  func(rtt time.Duration, seq int ,id int, addr net.Addr)
 	recvErrFunc func(err error, cli *IcmpClient)
 	sendSeqErrFunc func(cli *IcmpClient, dst net.Addr, seq int, id int)
+	collection *utils.LogCollection
 }
 
 func timeToBytes(t time.Time) []byte {
@@ -70,7 +73,9 @@ func defaultRecvHandle(rtt time.Duration, seq int ,id int, addr net.Addr) {
 }
 
 func defaultSendErrFunc(err error, cli *IcmpClient, dst net.Addr, seq int, id int)  {
-	logrus.Errorf("ping to %s, seq is %d, id is %d, err is %s",dst.String(), seq, id, err.Error())
+	msg := fmt.Sprintf("ping to %s, seq is %d, id is %d, err is %s",dst.String(), seq, id, err.Error())
+	logrus.Errorf(msg)
+	go cli.collection.Save(msg, utils.ErrorLog)
 }
 
 func defaultRecvErrFunc(err error, cli *IcmpClient)  {
@@ -79,18 +84,22 @@ func defaultRecvErrFunc(err error, cli *IcmpClient)  {
 			logrus.Debugf("recvICMP(): Read Timeout")
 			return
 		} else {
-			logrus.Errorf("recv error:%s",err.Error())
+			msg := fmt.Sprintf("recv error:%s",err.Error())
+			logrus.Errorf(msg)
+			go cli.collection.Save(msg, utils.ErrorLog)
 			return
 		}
 	}
 }
 
 func defaultSendSeqErrFunc(cli *IcmpClient, dst net.Addr, seq int, id int) {
-	logrus.Errorf("ping icmp, seq %d, id %d, addr %s,is not get recv before next icmp", seq, id, dst.String())
+	msg := fmt.Sprintf("ping icmp, seq %d, id %d, addr %s,is not get recv before next icmp", seq, id, dst.String())
+	logrus.Errorf(msg)
+	go cli.collection.Save(msg, utils.ErrorLog)
 }
 
-func NewICMPClient(servers []string, opt* Options) *IcmpClient {
-	return &IcmpClient{
+func NewICMPClient(servers []string, opt* Options, collection *utils.LogCollection) *IcmpClient {
+	c := &IcmpClient{
 		servers: servers,
 		opt: opt,
 		recvHandle: defaultRecvHandle,
@@ -100,7 +109,17 @@ func NewICMPClient(servers []string, opt* Options) *IcmpClient {
 		addrMap: make(map[string]net.Addr),
 		seqMap: make(map[string]*seqSt),
 		seqMapMutex: new(sync.Mutex),
+		collection: collection,
 	}
+
+	c.startLog()
+	return c
+}
+
+func (c *IcmpClient) startLog()  {
+	msg := fmt.Sprint("start to run icmp client")
+	logrus.Info(msg)
+	go c.collection.Save(msg, utils.InfoLog)
 }
 
 func newContext() *context {

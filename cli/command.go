@@ -6,6 +6,7 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/wangforthinker/netPing/client"
 	"time"
+	"github.com/coreos/etcd/pkg/netutil"
 )
 
 func run(c *cli.Context)  {
@@ -32,7 +33,17 @@ func run(c *cli.Context)  {
 	timeInterval := c.Int("timeInterval")
 	logrus.Infof("timeInterval is %d ms", timeInterval)
 
-	pingClient := client.NewICMPClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval)})
+	localIp := get_internal()
+	logServerAddr := c.String("logServer")
+
+	logrus.Infof("local ip is %s, log server addr is %s", localIp, logServerAddr)
+
+	logCol,err := utils.NewLogCollection(logServerAddr, localIp)
+	if(err != nil){
+		logrus.Fatal(err.Error())
+	}
+
+	pingClient := client.NewICMPClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval)}, logCol)
 
 	cli := &client.Client{
 		Client: pingClient,
@@ -43,4 +54,10 @@ func run(c *cli.Context)  {
 	if(err != nil){
 		logrus.Fatalf(err.Error())
 	}
+}
+
+func server(c *cli.Context)  {
+	host := c.String("host")
+	logrus.Infof("start server in %s",host)
+	utils.NewServerAndRun(host)
 }
