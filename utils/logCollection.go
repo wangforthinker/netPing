@@ -2,7 +2,7 @@ package utils
 
 import (
 	"time"
-	"github.com/opencontainers/runc/Godeps/_workspace/src/github.com/Sirupsen/logrus"
+	"github.com/Sirupsen/logrus"
 )
 
 type logSt struct {

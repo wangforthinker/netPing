@@ -6,7 +6,6 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/wangforthinker/netPing/client"
 	"time"
-	"github.com/coreos/etcd/pkg/netutil"
 )
 
 func run(c *cli.Context)  {

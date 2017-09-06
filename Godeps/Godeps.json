@@ -19,6 +19,11 @@
 			"Rev": "f2d77a61e3c169b43402a0a1e84f06daf29b8190"
 		},
 		{
+			"ImportPath": "github.com/gorilla/mux",
+			"Comment": "v1.4.0-16-g24fca30",
+			"Rev": "24fca303ac6da784b9e8269f724ddeb0b2eea5e7"
+		},
+		{
 			"ImportPath": "github.com/samalba/dockerclient",
 			"Rev": "a3036261847103270e9f732509f43b5f98710ace"
 		},
