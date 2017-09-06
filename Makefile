@@ -22,7 +22,6 @@ build-local:
 	go get -v github.com/gorilla/context
 	go build -a -v
 
-
 image:
 	make build
-	docker build --rm -t ${IMAGE_NAME}:${MAJOR_VERSION}-${GIT_VERSION}-${DATE}  .
+	docker build --rm -t ${IMAGE_NAME}:${GIT_VERSION}-${DATE}  .
