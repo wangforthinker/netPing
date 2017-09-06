@@ -16,8 +16,13 @@ GIT_NOTES     = $(shell git log -1 --oneline)
 default: image
 
 build:
-	docker run --rm -v $(shell pwd):/go/src/github.com/wangforthinker/${PROJECT_NAME} -w /go/src/github.com/wangforthinker/${PROJECT_NAME} ${BUILD_IMAGE}  go build -a -v
+	docker run --rm -v $(shell pwd):/go/src/github.com/wangforthinker/${PROJECT_NAME} -w /go/src/github.com/wangforthinker/${PROJECT_NAME} ${BUILD_IMAGE} make build-local
+
+build-local:
+	go get -v github.com/gorilla/context
+	go build -a -v
+
 
 image:
-	docker run --rm -v $(shell pwd):/go/src/github.com/wangforthinker/${PROJECT_NAME} -w /go/src/github.com/wangforthinker/${PROJECT_NAME} ${BUILD_IMAGE}  go build -a -v
+	make build
 	docker build --rm -t ${IMAGE_NAME}:${MAJOR_VERSION}-${GIT_VERSION}-${DATE}  .

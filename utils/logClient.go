@@ -38,7 +38,7 @@ func (cli *LogClient)PostLog(logs []*logSt) error {
 		return err
 	}
 
-	req.Header["Content-Type"] = "application/json"
+	req.Header.Set("Content-Type", "application/json")
 
 	resp,err := http.DefaultClient.Do(req)
 	if(err != nil){

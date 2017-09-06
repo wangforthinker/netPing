@@ -17,4 +17,6 @@ func get_internal() string {
 			}
 		}
 	}
+
+	return ""
 }
