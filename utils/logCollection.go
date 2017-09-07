@@ -29,7 +29,6 @@ const(
 )
 
 func NewLogCollection(logServer string, sourceIp string) (*LogCollection,error) {
-	logrus.SetLevel(logrus.DebugLevel)
 	logrus.Debugf("new log collection")
 	logCli,err := NewLogClient(logServer)
 	if(err != nil){
