@@ -1,4 +1,4 @@
-FROM golang:1.6.1
+FROM acs-reg.alipay.com/acs/acs-perf:latest
 
 RUN mkdir -p /usr/bin
 
