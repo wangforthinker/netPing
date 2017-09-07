@@ -13,6 +13,7 @@ type logSt struct {
 
 type LogCollection struct {
 	cache chan *logSt
+	stop chan bool
 	logServer string
 	sourceIp  string
 
@@ -28,6 +29,8 @@ const(
 )
 
 func NewLogCollection(logServer string, sourceIp string) (*LogCollection,error) {
+	logrus.SetLevel(logrus.DebugLevel)
+	logrus.Debugf("new log collection")
 	logCli,err := NewLogClient(logServer)
 	if(err != nil){
 		return nil,err
@@ -35,6 +38,7 @@ func NewLogCollection(logServer string, sourceIp string) (*LogCollection,error) 
 
 	logCol := &LogCollection{
 		cache: make(chan *logSt, 500),
+		stop: make(chan bool),
 		logServer: logServer,
 		sourceIp: sourceIp,
 		logCli: logCli,
@@ -43,6 +47,10 @@ func NewLogCollection(logServer string, sourceIp string) (*LogCollection,error) 
 	go logCol.run()
 
 	return logCol,nil
+}
+
+func (c *LogCollection)Stop()  {
+	c.stop <- true
 }
 
 func (c *LogCollection)Save(msg string, logType int) error {
@@ -74,29 +82,52 @@ func (c *LogCollection) run() {
 				go c.saveToRemote(postLog, finishChan)
 			}
 		case f := <- finishChan:
+			logrus.Debugf("in collection run,receive finish chan %v",f)
 			if(f) {
+				logrus.Debugf("in collection run,before exchange saveLog len is %d",len(saveLog))
 				postLog = saveLog
 				saveLog = []*logSt{}
+				logrus.Debugf("in collection run,after exchange postlog len is %d",len(postLog))
 				finish = f
 			}
 		case log := <- c.cache:
+			logrus.Debugf("in collection run, get log: %s",log.Msg)
 			saveLog = append(saveLog, log)
+		case stop := <- c.stop:
+			if(stop){
+				logrus.Info("recevice stop singal")
+				return
+			}
 		}
 	}
 }
 
 func (c *LogCollection) saveToRemote(log []*logSt, finish chan bool) {
+	defer func() {
+		finish <- true
+	}()
+
+	logLen := 0
+	if(log != nil){
+		logLen = len(log)
+	}
+
+	logrus.Debugf("in log collection, saveToRemote recevice log len is %d",logLen)
+
+	if(log == nil || len(log) == 0){
+		return
+	}
+
+	logrus.Debugf("in log collection, saveToRemote recevice log len is %d",len(log))
+
 	err := c.logCli.PostLog(log)
 	if(err == nil){
+		logrus.Debugf("post log to remote ok")
 		return
 	}
 
 	ticker := time.NewTicker(time.Second * 10)
 	defer ticker.Stop()
-
-	defer func() {
-		finish <- true
-	}()
 
 	times := 0
 
@@ -105,7 +136,10 @@ func (c *LogCollection) saveToRemote(log []*logSt, finish chan bool) {
 		case <-ticker.C:
 			err := c.logCli.PostLog(log)
 			if(err == nil){
+				logrus.Debugf("post log to remote ok")
 				return
+			}else{
+				logrus.Errorf("post log to remote error:%s",err.Error())
 			}
 
 			times ++
