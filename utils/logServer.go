@@ -68,8 +68,7 @@ func writeJsonResponse(w http.ResponseWriter, statusCode int, v interface{}) {
 }
 
 func serverSaveLog(c *context, w http.ResponseWriter, r *http.Request)  {
-	logs := []*logSt{}
-
+	logs := &postLog{}
 	err := json.NewDecoder(r.Body).Decode(&logs)
 	if(err != nil) {
 		logrus.Errorf("request error:%s", err.Error())
@@ -77,8 +76,18 @@ func serverSaveLog(c *context, w http.ResponseWriter, r *http.Request)  {
 		return
 	}
 
-	for _,log := range logs{
-		logrus.Infof("from server %s, message is %s",log.SourceIp, log.Msg)
+	if(logs.Logs != nil && len(logs.Logs) > 0) {
+		for _, log := range logs.Logs {
+			if(log.LogType == InfoLog) {
+				logrus.Infof("from server %s, message is %s", log.SourceIp, log.Msg)
+			}else if(log.LogType == ErrorLog){
+				logrus.Errorf("from server %s, message is %s", log.SourceIp, log.Msg)
+			}else{
+				logrus.Infof("from server %s, message is %s", log.SourceIp, log.Msg)
+			}
+		}
+	}else{
+		logrus.Errorf("receve logs is nil")
 	}
 
 	w.WriteHeader(http.StatusOK)

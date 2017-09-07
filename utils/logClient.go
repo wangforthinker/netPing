@@ -18,6 +18,10 @@ type LogClient struct {
 	url	*url.URL
 }
 
+type postLog struct {
+	Logs	[]*logSt	`json:"logs"`
+}
+
 func NewLogClient(server string) (*LogClient,error) {
 	ul,err := url.Parse(fmt.Sprintf("http://%s/%s",server, savePath))
 	if(err != nil){
@@ -28,7 +32,8 @@ func NewLogClient(server string) (*LogClient,error) {
 }
 
 func (cli *LogClient)PostLog(logs []*logSt) error {
-	data,err := json.Marshal(logs)
+	postData := &postLog{Logs: logs}
+	data,err := json.Marshal(postData)
 	if(err != nil){
 		return err
 	}
