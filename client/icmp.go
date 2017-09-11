@@ -21,47 +21,29 @@ type context struct {
 	err  error
 }
 
-type packet struct {
+type icmpPacket struct {
 	bytes	[]byte
 	addr	net.Addr
 }
 
 type seqSt struct {
-	seq int
-	id int
-	read bool
+	readChMap map[int]map[int]chan bool
 	addr net.Addr
+	mutex *sync.Mutex
 }
 
 type IcmpClient struct {
 	servers     []string
+	recvTimeOut time.Duration
 	opt         *Options
 	conn        *icmp.PacketConn
-	addrMap     map[string]net.Addr
 	seqMap	    map[string]*seqSt
-	seqMapMutex *sync.Mutex
 	sendErrFunc func(err error, cli *IcmpClient, dst net.Addr, seq int, id int)
 	recvHandle  func(rtt time.Duration, seq int ,id int, addr net.Addr)
 	recvErrFunc func(err error, cli *IcmpClient)
 	sendSeqErrFunc func(cli *IcmpClient, dst net.Addr, seq int, id int)
+	recvTimeOutSeqErrFunc func(cli *IcmpClient, dst net.Addr, seq int, id int)
 	collection *utils.LogCollection
-}
-
-func timeToBytes(t time.Time) []byte {
-	nsec := t.UnixNano()
-	b := make([]byte, 8)
-	for i := uint8(0); i < 8; i++ {
-		b[i] = byte((nsec >> ((7 - i) * 8)) & 0xff)
-	}
-	return b
-}
-
-func bytesToTime(b []byte) time.Time {
-	var nsec int64
-	for i := uint8(0); i < 8; i++ {
-		nsec += int64(b[i]) << ((7 - i) * 8)
-	}
-	return time.Unix(nsec/1000000000, nsec%1000000000)
 }
 
 func defaultRecvHandle(rtt time.Duration, seq int ,id int, addr net.Addr) {
@@ -98,6 +80,12 @@ func defaultSendSeqErrFunc(cli *IcmpClient, dst net.Addr, seq int, id int) {
 	go cli.collection.Save(msg, utils.ErrorLog)
 }
 
+func defaultRecvTimeOutErrFunc(cli *IcmpClient, dst net.Addr, seq int, id int) {
+	msg := fmt.Sprintf("ping icmp, seq %d, id %d, addr %s, is time out %d s", seq, id, dst.String(), cli.recvTimeOut)
+	logrus.Errorf(msg)
+	go cli.collection.Save(msg, utils.ErrorLog)
+}
+
 func NewICMPClient(servers []string, opt* Options, collection *utils.LogCollection) *IcmpClient {
 	c := &IcmpClient{
 		servers: servers,
@@ -106,10 +94,10 @@ func NewICMPClient(servers []string, opt* Options, collection *utils.LogCollecti
 		sendErrFunc: defaultSendErrFunc,
 		recvErrFunc: defaultRecvErrFunc,
 		sendSeqErrFunc: defaultSendSeqErrFunc,
-		addrMap: make(map[string]net.Addr),
+		recvTimeOutSeqErrFunc: defaultRecvTimeOutErrFunc,
 		seqMap: make(map[string]*seqSt),
-		seqMapMutex: new(sync.Mutex),
 		collection: collection,
+		recvTimeOut: time.Second * 10,
 	}
 
 	c.startLog()
@@ -129,13 +117,7 @@ func newContext() *context {
 	}
 }
 
-func ipv4Payload(b []byte) []byte {
-	if len(b) < ipv4.HeaderLen {
-		return b
-	}
-	hdrlen := int(b[0]&0x0f) << 2
-	return b[hdrlen:]
-}
+
 
 func (c *IcmpClient) Ping() error {
 	conn,err := c.initConn("ip4:icmp", "")
@@ -168,39 +150,57 @@ func (c *IcmpClient) run() error {
 			return err
 		}
 
-		c.addrMap[addr.String()] = addr
-		c.seqMap[addr.String()] = &seqSt{id:0,seq:0,addr:addr,read:true}
+		c.seqMap[addr.String()] = &seqSt{
+			mutex: &sync.Mutex{},
+			addr: addr,
+			readChMap: make(map[int]map[int] chan bool),
+		}
 	}
 
 	c.runLoop(ct)
 	return nil
 }
 
-func addSeqAndId(id , seq int) (int, int) {
-	add := 0
 
-	if(seq == 0xff){
-		seq = 0
-		add = 1
-	}else{
-		seq ++
-	}
 
-	if(add ==1){
-		if(id == 0xff){
-			id = 0
-		}else{
-			id ++
+func (c *IcmpClient) icmpRespThread(readCh chan bool, stopCh chan bool,seq int, id int, st *seqSt) {
+	ticker := time.NewTicker(c.recvTimeOut)
+	defer ticker.Stop()
+
+	for {
+		out := false
+		select {
+		case <-ticker.C:
+			c.recvTimeOutSeqErrFunc(c, st.addr, seq, id)
+			out = true
+			break
+		case <-readCh:
+			out = true
+			break
+		case stop := <-stopCh:
+			if(stop) {
+				logrus.Infof("addr %s, seq %d, id %d , icmp resp thread is stop", st.addr.String(), seq, id)
+				out = true
+				break
+			}
+		}
+
+		if(out){
+			break
 		}
 	}
 
-	return id,seq
+	st.mutex.Lock()
+	defer st.mutex.Unlock()
+
+	close(readCh)
+	delete(st.readChMap[id], seq)
 }
 
 func (c *IcmpClient)runLoop(ct *context) {
 	//wg := sync.WaitGroup{}
 
-	recvChan := make(chan *packet, 1)
+	recvChan := make(chan *icmpPacket, 100)
 
 	id := 0
 	seq := 0
@@ -221,12 +221,12 @@ func (c *IcmpClient)runLoop(ct *context) {
 			id,seq = addSeqAndId(id, seq)
 			c.sendAllIcmp(ct, id, seq)
 		case recvPacket := <- recvChan:
-			c.procRecv(recvPacket, c.addrMap, id, seq)
+			go c.procRecv(recvPacket)
 		}
 	}
 }
 
-func (c *IcmpClient) procRecv(recv *packet, queue map[string]net.Addr, id int ,seq int) {
+func (c *IcmpClient) procRecv(recv *icmpPacket) {
 	var ipaddr *net.IPAddr
 	switch adr := recv.addr.(type) {
 	case *net.IPAddr:
@@ -238,7 +238,7 @@ func (c *IcmpClient) procRecv(recv *packet, queue map[string]net.Addr, id int ,s
 	}
 
 	addr := ipaddr.String()
-	if _, ok := c.addrMap[addr]; !ok {
+	if _, ok := c.seqMap[addr]; !ok {
 		return
 	}
 
@@ -257,57 +257,71 @@ func (c *IcmpClient) procRecv(recv *packet, queue map[string]net.Addr, id int ,s
 		return
 	}
 
+	seq := 0
+	id := 0
+
 	var rtt time.Duration
 	switch pkt := m.Body.(type) {
 	case *icmp.Echo:
-		if pkt.ID == id && pkt.Seq == seq {
-			rtt = time.Since(bytesToTime(pkt.Data))
-		}
+		seq = pkt.Seq
+		id = pkt.ID
+		rtt = time.Since(bytesToTime(pkt.Data))
 	default:
 		return
 	}
 
-	if netAddr, ok := queue[addr]; ok {
-		c.recvHandle(rtt, seq, id, netAddr)
-	}
+	if st, ok := c.seqMap[addr]; ok {
+		c.recvHandle(rtt, seq, id, st.addr)
 
-	c.seqMapMutex.Lock()
+		st.mutex.Lock()
+		defer st.mutex.Unlock()
 
-	if st,ok := c.seqMap[addr];ok{
-		if(st.seq == seq && st.id == id){
-			st.read = true
+		_,ok := st.readChMap[id]
+		if(!ok){
+			return
 		}
-	}
 
-	c.seqMapMutex.Unlock()
+		_,ok = st.readChMap[id][seq]
+		if(!ok){
+			return
+		}
+
+		st.readChMap[id][seq] <- true
+	}
 }
 
 func (c *IcmpClient) sendAllIcmp(ct *context, id int, seq int) {
 	wg := new(sync.WaitGroup)
 
-	c.seqMapMutex.Lock()
 	for _,st := range c.seqMap{
-		if(!st.read){
-			c.sendSeqErrFunc(c, st.addr, st.seq, st.id)
+		st.mutex.Lock()
+
+		_,ok := st.readChMap[id]
+		if(!ok){
+			st.readChMap[id] = make(map[int]chan bool)
 		}
 
-		st.read = false
-		st.seq = seq
-		st.id = id
-	}
-	c.seqMapMutex.Unlock()
+		readCh := make(chan bool)
 
-	for _,addr := range c.addrMap{
+		st.readChMap[id][seq] = readCh
+
+		st.mutex.Unlock()
+
 		wg.Add(1)
-		go c.sendIcmp(ct, addr, id, seq, wg)
+
+		stopCh := make(chan bool)
+
+		go c.icmpRespThread(readCh, stopCh, seq, id, st)
+		go c.sendIcmp(ct, st.addr, id, seq, stopCh ,wg)
 	}
 
 	wg.Wait()
 }
 
-func (c *IcmpClient) sendIcmp(ct *context, dst net.Addr,id int, seq int, wg *sync.WaitGroup) error {
+func (c *IcmpClient) sendIcmp(ct *context, dst net.Addr,id int, seq int, stopCh chan bool, wg *sync.WaitGroup) error {
 	conn := c.conn
 	defer wg.Done()
+	defer close(stopCh)
 
 	times := timeToBytes(time.Now())
 
@@ -323,19 +337,23 @@ func (c *IcmpClient) sendIcmp(ct *context, dst net.Addr,id int, seq int, wg *syn
 
 	data,err := msg.Marshal(nil)
 	if(err != nil){
+		stopCh <- true
 		logrus.Errorf("encode error:%s",err.Error())
 		return err
 	}
 
 	_,err = conn.WriteTo(data, dst)
 	if(err != nil){
+		stopCh <- true
 		c.sendErrFunc(err, c, dst, seq, id)
 	}
+
+	stopCh <- false
 
 	return err
 }
 
-func (c *IcmpClient)recvIcmp(ctx *context, recv chan *packet)  {
+func (c *IcmpClient)recvIcmp(ctx *context, recv chan *icmpPacket)  {
 	conn := c.conn
 
 	for {
@@ -370,7 +388,7 @@ func (c *IcmpClient)recvIcmp(ctx *context, recv chan *packet)  {
 		logrus.Debug("recvICMP(): p.recv <- packet")
 
 		select {
-		case recv <- &packet{bytes: bytes, addr: ra}:
+		case recv <- &icmpPacket{bytes: bytes, addr: ra}:
 		case <-ctx.stop:
 			logrus.Debug("recvICMP(): <-ctx.stop")
 			logrus.Debug("recvICMP(): wg.Done()")
