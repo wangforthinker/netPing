@@ -97,7 +97,7 @@ func defaultUdpRecvHandle(rtt time.Duration, seq int ,id int, addr net.Addr) {
 	secondTime := int(rttTime)
 	msecondTime := (rttTime - float64(secondTime)) * 1000
 
-	logrus.Infof("udp to %s, seq is %d, id is %d, rtt is %ds %.3f ms",addr.String(), seq, id, secondTime, msecondTime)
+	logrus.Infof("udp ping to %s, seq is %d, id is %d, rtt is %ds %.3f ms",addr.String(), seq, id, secondTime, msecondTime)
 }
 
 func defaultUdpSendErrFunc(err error, cli *UdpClient, dst net.Addr, seq int, id int)  {
@@ -144,7 +144,7 @@ func NewUdpClient(servers []string, opt* Options, collection *utils.LogCollectio
 		seqMap: make(map[string]*seqSt),
 		connMap: make(map[string]*net.UDPConn),
 		collection: collection,
-		recvTimeOut: time.Second * 10,
+		recvTimeOut: time.Second * 3,
 	}
 
 	c.startLog()
@@ -213,7 +213,7 @@ func (c *UdpClient) runLoop(ct *context) {
 	for{
 		select {
 		case <-ct.stop:
-			logrus.Debug("get stop single in run loop")
+			logrus.Infof("get stop single in run loop")
 			return
 		case <- ticker.C:
 			logrus.Debugf("send next udp packet ticker is coming")
@@ -334,7 +334,7 @@ func (c *UdpClient) sendPacket(ct *context, conn *net.UDPConn, dst net.Addr, id 
 
 	_data := msg.Marshal()
 
-//	logrus.Infof("udp client, message len is %d, seq is %d, id is %d",len(_data), msg.Seq, msg.Id)
+	logrus.Debugf("udp client start to ping,seq is %d, id is %d, addr is %s", msg.Seq, msg.Id, dst.String())
 
 	_,err := conn.WriteTo(_data, dst)
 	if(err != nil){
@@ -342,6 +342,8 @@ func (c *UdpClient) sendPacket(ct *context, conn *net.UDPConn, dst net.Addr, id 
 		c.sendErrFunc(err, c, dst, seq, id)
 		return
 	}
+
+	logrus.Debugf("udp client end write to ping,seq is %d, id is %d, addr is %s", msg.Seq, msg.Id, dst.String())
 
 	stopCh <- false
 }

@@ -69,4 +69,16 @@ var(
 		EnvVar: env.UDP_LISTEN_PORT,
 		Value:"19999",
 	}
+
+	fIcmpPing = cli.BoolFlag{
+		Name: "icmpPing",
+		Usage: "open icmp ping",
+		EnvVar: env.ICMP_PING,
+	}
+
+	fUdpPing = cli.BoolFlag{
+		Name: "udpPing",
+		Usage: "open udp ping",
+		EnvVar: env.UDP_PING,
+	}
 )

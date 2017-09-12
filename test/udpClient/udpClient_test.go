@@ -17,7 +17,7 @@ func TestUdpClient(t *testing.T)  {
 
 	ctx := client.NewContext()
 
-	cli := client.NewUdpClient([]string{"127.0.0.1"}, &client.Options{Port:19999, PackageLength:128, Interval: time.Second}, collection)
+	cli := client.NewUdpClient([]string{"11.160.214.5","11.160.215.5"}, &client.Options{Port:19999, PackageLength:128, Interval: time.Second}, collection)
 
 	err = cli.Ping(ctx)
 	assert.Nil(t, err)

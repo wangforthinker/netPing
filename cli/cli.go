@@ -46,7 +46,8 @@ func Run()  {
 			Usage: "start sg icmp,udp,tcp connect test",
 			Action: run,
 			Flags:[]cli.Flag{
-				fSwarmPoints, fTls, fTlsClientKey, fTlsClientCert, fContainerNumbers, fTimeInterval, fConnectContainerLabelValue, fLogServer, fUdpPort},
+				fSwarmPoints, fTls, fTlsClientKey, fTlsClientCert, fContainerNumbers, fTimeInterval,
+				fConnectContainerLabelValue, fLogServer, fUdpPort, fIcmpPing, fUdpPing},
 		},
 		{
 			Name: "server",

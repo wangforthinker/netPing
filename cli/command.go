@@ -22,6 +22,10 @@ func run(c *cli.Context)  {
 
 	_udpPort := c.String("udpPort")
 
+	icmpPing := c.Bool("icmpPing")
+
+	udpPing := c.Bool("udpPing")
+
 	udpPort,err := strconv.Atoi(_udpPort)
 	if(err != nil){
 		logrus.Fatal(err.Error())
@@ -50,38 +54,40 @@ func run(c *cli.Context)  {
 		logrus.Fatal(err.Error())
 	}
 
-	pingClient := client.NewICMPClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval)}, logCol)
-	udpClient := client.NewUdpClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval) ,Port: udpPort}, logCol)
-
-	udpServer := client.NewUdpServer(udpPort)
-
 	icmpCtx := client.NewContext()
 	udpCtx := client.NewContext()
 	udpServerCtx := client.NewContext()
 
-	icmpCli := &client.Client{
-		Client: pingClient,
-		Type: client.ICMP_TYPE,
+	if(icmpPing) {
+		pingClient := client.NewICMPClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval)}, logCol)
+		icmpCli := &client.Client{
+			Client: pingClient,
+			Type: client.ICMP_TYPE,
+		}
+		err = icmpCli.Ping(icmpCtx)
+		if(err != nil){
+			logrus.Fatalf(err.Error())
+		}
 	}
 
-	udpCli := &client.Client{
-		Client: udpClient,
-		Type: client.UDP_TYPE,
-	}
+	if(udpPing){
+		udpClient := client.NewUdpClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval) ,Port: udpPort}, logCol)
+		udpServer := client.NewUdpServer(udpPort)
 
-	err = udpServer.Service(udpServerCtx)
-	if(err != nil){
-		logrus.Fatal(err.Error())
-	}
+		udpCli := &client.Client{
+			Client: udpClient,
+			Type: client.UDP_TYPE,
+		}
 
-	err = icmpCli.Ping(icmpCtx)
-	if(err != nil){
-		logrus.Fatalf(err.Error())
-	}
+		err = udpServer.Service(udpServerCtx)
+		if(err != nil){
+			logrus.Fatal(err.Error())
+		}
 
-	err = udpCli.Ping(udpCtx)
-	if(err != nil){
-		logrus.Fatalf(err.Error())
+		err = udpCli.Ping(udpCtx)
+		if(err != nil){
+			logrus.Fatalf(err.Error())
+		}
 	}
 
 	udpServerCtx.Wait()
