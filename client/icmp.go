@@ -49,9 +49,9 @@ type IcmpClient struct {
 func defaultRecvHandle(rtt time.Duration, seq int ,id int, addr net.Addr) {
 	rttTime := rtt.Seconds()
 	secondTime := int(rttTime)
-	msecondTime := int((rttTime - float64(secondTime)) * 1000)
+	msecondTime := (rttTime - float64(secondTime)) * 1000
 
-	logrus.Infof("ping to %s, seq is %d, id is %d, rtt is %ds %dms",addr.String(), seq, id, secondTime, msecondTime)
+	logrus.Infof("ping to %s, seq is %d, id is %d, rtt is %d s %.3f ms",addr.String(), seq, id, secondTime, msecondTime)
 }
 
 func defaultSendErrFunc(err error, cli *IcmpClient, dst net.Addr, seq int, id int)  {
@@ -110,23 +110,25 @@ func (c *IcmpClient) startLog()  {
 	go c.collection.Save(msg, utils.InfoLog)
 }
 
-func newContext() *context {
+func NewContext() *context {
 	return &context{
 		stop: make(chan bool),
 		done: make(chan bool),
 	}
 }
 
+func (ctx *context)Wait() {
+	<- ctx.done
+}
 
-
-func (c *IcmpClient) Ping() error {
+func (c *IcmpClient) Ping(ctx *context) error {
 	conn,err := c.initConn("ip4:icmp", "")
 	if(err != nil){
 		return err
 	}
 
 	c.conn = conn
-	c.run()
+	c.run(ctx)
 
 	return nil
 }
@@ -141,8 +143,7 @@ func (c *IcmpClient) initConn(netProto, source string) (*icmp.PacketConn,error) 
 	return conn,nil
 }
 
-func (c *IcmpClient) run() error {
-	ct := newContext()
+func (c *IcmpClient) run(ctx *context) error {
 	for _,ip := range c.servers{
 		addr,err := net.ResolveIPAddr("",ip)
 		if(err != nil){
@@ -157,11 +158,9 @@ func (c *IcmpClient) run() error {
 		}
 	}
 
-	c.runLoop(ct)
+	go c.runLoop(ctx)
 	return nil
 }
-
-
 
 func (c *IcmpClient) icmpRespThread(readCh chan bool, stopCh chan bool,seq int, id int, st *seqSt) {
 	ticker := time.NewTicker(c.recvTimeOut)
@@ -318,7 +317,7 @@ func (c *IcmpClient) sendAllIcmp(ct *context, id int, seq int) {
 	wg.Wait()
 }
 
-func (c *IcmpClient) sendIcmp(ct *context, dst net.Addr,id int, seq int, stopCh chan bool, wg *sync.WaitGroup) error {
+func (c *IcmpClient) sendIcmp(ct *context, dst net.Addr,id int, seq int, stopCh chan bool, wg *sync.WaitGroup) {
 	conn := c.conn
 	defer wg.Done()
 	defer close(stopCh)
@@ -339,18 +338,17 @@ func (c *IcmpClient) sendIcmp(ct *context, dst net.Addr,id int, seq int, stopCh 
 	if(err != nil){
 		stopCh <- true
 		logrus.Errorf("encode error:%s",err.Error())
-		return err
+		return
 	}
 
 	_,err = conn.WriteTo(data, dst)
 	if(err != nil){
 		stopCh <- true
 		c.sendErrFunc(err, c, dst, seq, id)
+		return
 	}
 
 	stopCh <- false
-
-	return err
 }
 
 func (c *IcmpClient)recvIcmp(ctx *context, recv chan *icmpPacket)  {

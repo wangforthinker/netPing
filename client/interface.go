@@ -20,7 +20,7 @@ type Options struct {
 }
 
 type PingClient interface {
-	Ping() error
+	Ping(ctx *context) error
 }
 
 type Client struct {
@@ -28,9 +28,9 @@ type Client struct {
 	Type		string
 }
 
-func (c *Client) Ping() error {
+func (c *Client) Ping(ctx *context) error {
 	logrus.Infof("start to ping %s, ", c.Type)
-	return c.Client.Ping()
+	return c.Client.Ping(ctx)
 }
 
 

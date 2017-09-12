@@ -7,21 +7,22 @@ import (
 	"github.com/Sirupsen/logrus"
 	"sync"
 	"time"
-	"encoding/json"
 	"errors"
+	"bytes"
+	"encoding/binary"
 )
 
 const(
 	udpMagicType = int(0x1ff20ffe)
-	udpPacketSize = 20
 )
 
 type UdpClient struct {
 	servers 	[]string
 	collection 	*utils.LogCollection
 	opt		*Options
-	conn		*net.UDPConn
+	//conn		*net.UDPConn
 	seqMap	    	map[string]*seqSt
+	connMap		map[string]*net.UDPConn
 	recvTimeOut	time.Duration
 	sendErrFunc 	func(err error, cli *UdpClient, dst net.Addr, seq int, id int)
 	recvHandle  	func(rtt time.Duration, seq int ,id int, addr net.Addr)
@@ -37,25 +38,54 @@ type udpPacket struct {
 	Time		[]byte	`json:"time"`
 }
 
+func (p *udpPacket) Marshal() []byte {
+	bytesBuffer := bytes.NewBuffer([]byte{})
+	binary.Write(bytesBuffer, binary.BigEndian, int32(p.Seq))
+	binary.Write(bytesBuffer, binary.BigEndian, int32(p.Id))
+	binary.Write(bytesBuffer, binary.BigEndian, int32(p.Type))
+	bytes := bytesBuffer.Bytes()
+	return append(bytes, p.Time...)
+}
+
+func (p *udpPacket)UnMarshal (data []byte) {
+	bytesBuffer := bytes.NewBuffer(data[0:4])
+	var tmp int32
+	binary.Read(bytesBuffer, binary.BigEndian, &tmp)
+	p.Seq =  int(tmp)
+
+	bytesBuffer = bytes.NewBuffer(data[4:8])
+	binary.Read(bytesBuffer, binary.BigEndian, &tmp)
+
+	p.Id = int(tmp)
+
+	bytesBuffer = bytes.NewBuffer(data[8:12])
+	binary.Read(bytesBuffer, binary.BigEndian, &tmp)
+
+	p.Type = int(tmp)
+	p.Time = data[12:20]
+}
+
 type udpMessage struct {
 	bytes		[]byte
 	addr		net.Addr
+	length		int
 }
 
 func decodeUdpPacket(bytes []byte) (*udpPacket, error) {
-	if(len(bytes) < udpPacketSize){
-		err := fmt.Errorf("in decodeUdpPacket, recevice size is %d, not %d",len(bytes), udpPacketSize)
-		return nil, err
-	}
+	//if(len(bytes) < udpPacketSize){
+	//	err := fmt.Errorf("in decodeUdpPacket, recevice size is %d, not %d",len(bytes), udpPacketSize)
+	//	return nil, err
+	//}
 
 	ret := &udpPacket{}
-	err := json.Unmarshal(bytes, ret)
-	if(err != nil){
-		return nil,err
-	}
+	ret.UnMarshal(bytes)
+	//if(err != nil){
+	//	logrus.Errorf("bytes is %s",string(bytes))
+	//	return nil,err
+	//}
 
 	if(ret.Type != udpMagicType){
-		err = errors.New("recevice udp packet is not magic type")
+		err := errors.New("recevice udp packet is not magic type")
 		return nil,err
 	}
 
@@ -65,9 +95,9 @@ func decodeUdpPacket(bytes []byte) (*udpPacket, error) {
 func defaultUdpRecvHandle(rtt time.Duration, seq int ,id int, addr net.Addr) {
 	rttTime := rtt.Seconds()
 	secondTime := int(rttTime)
-	msecondTime := int((rttTime - float64(secondTime)) * 1000)
+	msecondTime := (rttTime - float64(secondTime)) * 1000
 
-	logrus.Infof("udp to %s, seq is %d, id is %d, rtt is %ds %dms",addr.String(), seq, id, secondTime, msecondTime)
+	logrus.Infof("udp to %s, seq is %d, id is %d, rtt is %ds %.3f ms",addr.String(), seq, id, secondTime, msecondTime)
 }
 
 func defaultUdpSendErrFunc(err error, cli *UdpClient, dst net.Addr, seq int, id int)  {
@@ -97,12 +127,12 @@ func defaultUdpSendSeqErrFunc(cli *UdpClient, dst net.Addr, seq int, id int) {
 }
 
 func defaultUdpRecvTimeOutErrFunc(cli *UdpClient, dst net.Addr, seq int, id int) {
-	msg := fmt.Sprintf("udp ping, seq %d, id %d, addr %s, is time out %d s", seq, id, dst.String(), cli.recvTimeOut)
+	msg := fmt.Sprintf("udp ping, seq %d, id %d, addr %s, is time out %d s", seq, id, dst.String(), int(cli.recvTimeOut.Seconds()))
 	logrus.Errorf(msg)
 	go cli.collection.Save(msg, utils.ErrorLog)
 }
 
-func NewUcpClient(servers []string, opt* Options, collection *utils.LogCollection) *UdpClient {
+func NewUdpClient(servers []string, opt* Options, collection *utils.LogCollection) *UdpClient {
 	c := &UdpClient{
 		servers: servers,
 		opt: opt,
@@ -112,6 +142,7 @@ func NewUcpClient(servers []string, opt* Options, collection *utils.LogCollectio
 		sendSeqErrFunc: defaultUdpSendSeqErrFunc,
 		recvTimeOutSeqErrFunc: defaultUdpRecvTimeOutErrFunc,
 		seqMap: make(map[string]*seqSt),
+		connMap: make(map[string]*net.UDPConn),
 		collection: collection,
 		recvTimeOut: time.Second * 10,
 	}
@@ -120,15 +151,31 @@ func NewUcpClient(servers []string, opt* Options, collection *utils.LogCollectio
 	return c
 }
 
-func (c *UdpClient) Ping() error {
-	conn,err := c.initConn("", c.opt.Port)
-	if(err != nil){
-		return err
+func (c *UdpClient) Ping(ctx *context) error {
+
+	for _,ip := range c.servers{
+		addr,err := net.ResolveUDPAddr("udp",fmt.Sprintf("%s:%d",ip, c.opt.Port))
+		if(err != nil){
+			logrus.Error(err.Error())
+			return err
+		}
+
+		conn ,err := c.initConn(ip, c.opt.Port)
+		if(err != nil){
+			logrus.Errorf("udp client init conn error:%s",err.Error())
+			return err
+		}
+
+		c.seqMap[addr.String()] = &seqSt{
+			mutex: &sync.Mutex{},
+			addr: addr,
+			readChMap: make(map[int]map[int]chan bool),
+		}
+
+		c.connMap[addr.String()] = conn
 	}
 
-	c.conn = conn
-	c.run()
-
+	c.run(ctx)
 	return nil
 }
 
@@ -138,32 +185,13 @@ func (c *UdpClient) startLog()  {
 	go c.collection.Save(msg, utils.InfoLog)
 }
 
-func (c *UdpClient) run() error {
-	ct := newContext()
-	for _,ip := range c.servers{
-		addr,err := net.ResolveUDPAddr("udp4",fmt.Sprintf("%s:%d",ip, c.opt.Port))
-		if(err != nil){
-			logrus.Error(err.Error())
-			return err
-		}
-
-		serverAddr := &net.IPAddr{IP:net.ParseIP(ip)}
-
-		c.seqMap[serverAddr.String()] = &seqSt{
-			mutex: &sync.Mutex{},
-			addr: addr,
-			readChMap: make(map[int]map[int]chan bool),
-		}
-	}
-
-	c.runLoop(ct)
+func (c *UdpClient) run(ctx *context) error {
+	go c.runLoop(ctx)
 	return nil
 }
 
 func (c *UdpClient) runLoop(ct *context) {
 	//wg := sync.WaitGroup{}
-
-	recvChan := make(chan *udpMessage, 100)
 
 	id := 0
 	seq := 0
@@ -172,7 +200,15 @@ func (c *UdpClient) runLoop(ct *context) {
 
 	ticker := time.NewTicker(c.opt.Interval)
 
-	go c.recvUdpPacket(ct, recvChan)
+	for key,conn := range c.connMap{
+		st,ok := c.seqMap[key]
+		if(!ok){
+			continue
+		}
+		recvChan := make(chan *udpMessage, 100)
+		go c.recvUdpPacket(ct, conn, recvChan)
+		go c.recvLoop(ct, recvChan, st)
+	}
 
 	for{
 		select {
@@ -183,23 +219,35 @@ func (c *UdpClient) runLoop(ct *context) {
 			logrus.Debugf("send next udp packet ticker is coming")
 			id,seq = addSeqAndId(id, seq)
 			c.sendAllUdpPacket(ct, id, seq)
+		}
+	}
+}
+
+func (c *UdpClient)recvLoop(ct *context, recvChan chan *udpMessage, st *seqSt)  {
+	for{
+		select {
+		case <-ct.stop:
+			logrus.Debug("get stop single in run loop")
+			return
 		case recvMsg := <- recvChan:
-			go c.procRecv(recvMsg)
+			go c.procRecv(recvMsg, st)
 		}
 	}
 }
 
 
-func (c *UdpClient) initConn(source string, port int) (*net.UDPConn, error){
-	if(source == ""){
-		source = "0.0.0.0"
-	}
-	addr,err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d",source, port))
-	if(err != nil){
-		return nil,err
-	}
+func (c *UdpClient) initConn(source string ,port int) (*net.UDPConn, error){
+	//if(source == ""){
+	//	source = "0.0.0.0"
+	//}
+	//raddr,err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d",source, port))
+	//if(err != nil){
+	//	return nil,err
+	//}
 
-	return net.ListenUDP("udp4", addr)
+	return 	net.ListenUDP("udp", nil)
+
+//	return net.DialUDP("udp", nil, raddr)
 }
 
 func (c *UdpClient) packetRespThread(readCh chan bool, stopCh chan bool,seq int, id int, st *seqSt) {
@@ -239,10 +287,17 @@ func (c *UdpClient) packetRespThread(readCh chan bool, stopCh chan bool,seq int,
 func (c *UdpClient) sendAllUdpPacket(ct *context, id int, seq int) {
 	wg := new(sync.WaitGroup)
 
+	logrus.Infof("start send all udp packet, seq %d, id %d",seq, id)
+
 	for _,st := range c.seqMap{
+		conn,ok := c.connMap[st.addr.String()]
+		if(!ok){
+			continue
+		}
+
 		st.mutex.Lock()
 
-		_,ok := st.readChMap[id]
+		_,ok = st.readChMap[id]
 		if(!ok){
 			st.readChMap[id] = make(map[int]chan bool)
 		}
@@ -258,14 +313,13 @@ func (c *UdpClient) sendAllUdpPacket(ct *context, id int, seq int) {
 		stopCh := make(chan bool)
 
 		go c.packetRespThread(readCh, stopCh, seq, id, st)
-		go c.sendPacket(ct, st.addr, id, seq, stopCh ,wg)
+		go c.sendPacket(ct, conn, st.addr, id, seq, stopCh ,wg)
 	}
 
 	wg.Wait()
 }
 
-func (c *UdpClient) sendPacket(ct *context, dst net.Addr, id int, seq int, stopCh chan bool, wg *sync.WaitGroup) {
-	conn := c.conn
+func (c *UdpClient) sendPacket(ct *context, conn *net.UDPConn, dst net.Addr, id int, seq int, stopCh chan bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer close(stopCh)
 
@@ -278,39 +332,29 @@ func (c *UdpClient) sendPacket(ct *context, dst net.Addr, id int, seq int, stopC
 		Type: udpMagicType,
 	}
 
-	_data,err := json.Marshal(msg)
-	if(err != nil){
-		stopCh <- true
-		logrus.Errorf("encode error:%s",err.Error())
-		return
-	}
+	_data := msg.Marshal()
 
-	data := packetSuppleToSize(_data, c.opt.PackageLength)
+//	logrus.Infof("udp client, message len is %d, seq is %d, id is %d",len(_data), msg.Seq, msg.Id)
 
-	_,err = conn.WriteTo(data, dst)
+	_,err := conn.WriteTo(_data, dst)
 	if(err != nil){
 		stopCh <- true
 		c.sendErrFunc(err, c, dst, seq, id)
+		return
 	}
 
 	stopCh <- false
 }
 
-func (c *UdpClient) procRecv(recv *udpMessage) {
-	var ipaddr *net.IPAddr
-	switch adr := recv.addr.(type) {
-	case *net.UDPAddr:
-		ipaddr = &net.IPAddr{IP: adr.IP, Zone: adr.Zone}
-	default:
+func (c *UdpClient) procRecv(recv *udpMessage, st *seqSt) {
+	if(recv.addr.String() != st.addr.String()){
+		logrus.Errorf("addr %s ,recevice udp message from %s",st.addr.String() ,recv.addr.String())
 		return
 	}
 
-	addr := ipaddr.String()
-	if _, ok := c.seqMap[addr]; !ok {
-		return
-	}
+//	logrus.Infof("receive message, from %s, len is %d",st.addr.String(), recv.length)
 
-	pkt,err := decodeUdpPacket(recv.bytes[:udpPacketSize])
+	pkt,err := decodeUdpPacket(recv.bytes[0:recv.length])
 	if(err != nil){
 		logrus.Errorf(err.Error())
 		return
@@ -320,29 +364,25 @@ func (c *UdpClient) procRecv(recv *udpMessage) {
 	seq := pkt.Seq
 	rtt := time.Since(bytesToTime(pkt.Time))
 
-	if st, ok := c.seqMap[addr]; ok {
-		c.recvHandle(rtt, seq, id, st.addr)
+	c.recvHandle(rtt, seq, id, st.addr)
 
-		st.mutex.Lock()
-		defer st.mutex.Unlock()
+	st.mutex.Lock()
+	defer st.mutex.Unlock()
 
-		_,ok := st.readChMap[id]
-		if(!ok){
-			return
-		}
-
-		_,ok = st.readChMap[id][seq]
-		if(!ok){
-			return
-		}
-
-		st.readChMap[id][seq] <- true
+	_,ok := st.readChMap[id]
+	if(!ok){
+		return
 	}
+
+	_,ok = st.readChMap[id][seq]
+	if(!ok){
+		return
+	}
+
+	st.readChMap[id][seq] <- true
 }
 
-func (c *UdpClient) recvUdpPacket(ctx *context, recv chan *udpMessage)  {
-	conn := c.conn
-
+func (c *UdpClient) recvUdpPacket(ctx *context, conn *net.UDPConn,recv chan *udpMessage)  {
 	for {
 		select {
 		case <-ctx.stop:
@@ -355,7 +395,7 @@ func (c *UdpClient) recvUdpPacket(ctx *context, recv chan *udpMessage)  {
 		conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 
 		logrus.Debugf("recvUdp(): ReadFrom Start:%s",time.Now().String())
-		_, ra, err := conn.ReadFrom(bytes)
+		length, ra, err := conn.ReadFrom(bytes)
 		logrus.Debug("recvICMP(): ReadFrom End:%s",time.Now().String())
 		if err != nil {
 			c. recvErrFunc(err, c)
@@ -375,7 +415,7 @@ func (c *UdpClient) recvUdpPacket(ctx *context, recv chan *udpMessage)  {
 		logrus.Debug("recvUdp(): p.recv <- packet")
 
 		select {
-		case recv <- &udpMessage{bytes: bytes, addr: ra}:
+		case recv <- &udpMessage{bytes: bytes, addr: ra, length: length}:
 		case <-ctx.stop:
 			logrus.Debug("recvUdp(): <-ctx.stop")
 			logrus.Debug("recvUdp(): wg.Done()")

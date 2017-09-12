@@ -6,6 +6,7 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/wangforthinker/netPing/client"
 	"time"
+	"strconv"
 )
 
 func run(c *cli.Context)  {
@@ -18,6 +19,13 @@ func run(c *cli.Context)  {
 	logrus.Infof("container numbers is %d",numbers)
 
 	labelValue := c.String("containerLableValue")
+
+	_udpPort := c.String("udpPort")
+
+	udpPort,err := strconv.Atoi(_udpPort)
+	if(err != nil){
+		logrus.Fatal(err.Error())
+	}
 
 	dockerClient,err := utils.NewDockerClient(endpoints, nil)
 	if(err != nil){
@@ -43,16 +51,42 @@ func run(c *cli.Context)  {
 	}
 
 	pingClient := client.NewICMPClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval)}, logCol)
+	udpClient := client.NewUdpClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval) ,Port: udpPort}, logCol)
 
-	cli := &client.Client{
+	udpServer := client.NewUdpServer(udpPort)
+
+	icmpCtx := client.NewContext()
+	udpCtx := client.NewContext()
+	udpServerCtx := client.NewContext()
+
+	icmpCli := &client.Client{
 		Client: pingClient,
 		Type: client.ICMP_TYPE,
 	}
 
-	err = cli.Ping()
+	udpCli := &client.Client{
+		Client: udpClient,
+		Type: client.UDP_TYPE,
+	}
+
+	err = udpServer.Service(udpServerCtx)
+	if(err != nil){
+		logrus.Fatal(err.Error())
+	}
+
+	err = icmpCli.Ping(icmpCtx)
 	if(err != nil){
 		logrus.Fatalf(err.Error())
 	}
+
+	err = udpCli.Ping(udpCtx)
+	if(err != nil){
+		logrus.Fatalf(err.Error())
+	}
+
+	udpServerCtx.Wait()
+	icmpCtx.Wait()
+	udpCtx.Wait()
 }
 
 func server(c *cli.Context)  {

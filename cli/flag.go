@@ -63,4 +63,10 @@ var(
 		Value: "0.0.0.0:11999",
 	}
 
+	fUdpPort = cli.StringFlag{
+		Name: "udpPort",
+		Usage:"udp listen port",
+		EnvVar: env.UDP_LISTEN_PORT,
+		Value:"19999",
+	}
 )
