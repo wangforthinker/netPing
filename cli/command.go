@@ -7,7 +7,22 @@ import (
 	"github.com/wangforthinker/netPing/client"
 	"time"
 	"strconv"
+	"fmt"
 )
+
+func heartBeat(logCol *utils.LogCollection, stop chan bool)  {
+	ticker := time.NewTicker(time.Second * 30)
+	defer ticker.Stop()
+
+	for{
+		select {
+		case <-ticker.C:
+			logCol.Save(fmt.Sprintf("heartbeat time:%s", time.Now().String()), utils.InfoLog)
+		case <-stop:
+			return
+		}
+	}
+}
 
 func run(c *cli.Context)  {
 	endpoints := c.String("SwarmPoints")
@@ -90,9 +105,14 @@ func run(c *cli.Context)  {
 		}
 	}
 
+	stopChan := make(chan bool)
+	heartBeat(logCol, stopChan)
+
 	udpServerCtx.Wait()
 	icmpCtx.Wait()
 	udpCtx.Wait()
+	stopChan <- true
+	close(stopChan)
 }
 
 func server(c *cli.Context)  {

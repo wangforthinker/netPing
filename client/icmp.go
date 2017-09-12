@@ -81,7 +81,7 @@ func defaultSendSeqErrFunc(cli *IcmpClient, dst net.Addr, seq int, id int) {
 }
 
 func defaultRecvTimeOutErrFunc(cli *IcmpClient, dst net.Addr, seq int, id int) {
-	msg := fmt.Sprintf("ping icmp, seq %d, id %d, addr %s, is time out %d s", seq, id, dst.String(), cli.recvTimeOut)
+	msg := fmt.Sprintf("ping icmp, seq %d, id %d, addr %s, is time out %d s", seq, id, dst.String(), int(cli.recvTimeOut.Seconds()))
 	logrus.Errorf(msg)
 	go cli.collection.Save(msg, utils.ErrorLog)
 }

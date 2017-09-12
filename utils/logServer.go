@@ -79,11 +79,11 @@ func serverSaveLog(c *context, w http.ResponseWriter, r *http.Request)  {
 	if(logs.Logs != nil && len(logs.Logs) > 0) {
 		for _, log := range logs.Logs {
 			if(log.LogType == InfoLog) {
-				logrus.Infof("from server %s, message is %s", log.SourceIp, log.Msg)
+				logrus.Infof("from server %s, message: %s", log.SourceIp, log.Msg)
 			}else if(log.LogType == ErrorLog){
-				logrus.Errorf("from server %s, message is %s", log.SourceIp, log.Msg)
+				logrus.Errorf("from server %s, message: %s", log.SourceIp, log.Msg)
 			}else{
-				logrus.Infof("from server %s, message is %s", log.SourceIp, log.Msg)
+				logrus.Infof("from server %s, message: %s", log.SourceIp, log.Msg)
 			}
 		}
 	}else{
