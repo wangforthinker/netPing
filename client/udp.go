@@ -302,7 +302,7 @@ func (c *UdpClient) sendAllUdpPacket(ct *context, id int, seq int) {
 			st.readChMap[id] = make(map[int]chan bool)
 		}
 
-		readCh := make(chan bool)
+		readCh := make(chan bool, 1)
 
 		st.readChMap[id][seq] = readCh
 
