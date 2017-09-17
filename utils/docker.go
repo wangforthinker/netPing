@@ -51,7 +51,8 @@ func GetServersIPs(client *dockerclient.DockerClient, numbers int, labelValue st
 		case <-ticker.C:
 			containers, err := getContainers(client, labelValue, SGLabelKey)
 			if (err != nil) {
-				return nil, err
+				logrus.Errorf(err.Error())
+				break
 			}
 
 			if (len(containers) < numbers) {
