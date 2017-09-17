@@ -5,9 +5,12 @@ import (
 	"github.com/wangforthinker/netPing/utils"
 	"github.com/Sirupsen/logrus"
 	"github.com/wangforthinker/netPing/client"
+	_ "net/http/pprof"
+	"log"
 	"time"
 	"strconv"
 	"fmt"
+	"net/http"
 )
 
 func heartBeat(logCol *utils.LogCollection, stop chan bool)  {
@@ -73,6 +76,10 @@ func run(c *cli.Context)  {
 	udpCtx := client.NewContext()
 	udpServerCtx := client.NewContext()
 
+	go func() {
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+	}()
+
 	if(icmpPing) {
 		pingClient := client.NewICMPClient(servers, &client.Options{Interval: time.Millisecond * time.Duration(timeInterval)}, logCol)
 		icmpCli := &client.Client{
@@ -118,5 +125,8 @@ func run(c *cli.Context)  {
 func server(c *cli.Context)  {
 	host := c.String("host")
 	logrus.Infof("start server in %s",host)
+	go func() {
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+	}()
 	utils.NewServerAndRun(host)
 }
