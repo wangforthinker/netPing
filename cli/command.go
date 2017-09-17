@@ -17,6 +17,8 @@ func heartBeat(logCol *utils.LogCollection, stop chan bool)  {
 	ticker := time.NewTicker(time.Second * 30)
 	defer ticker.Stop()
 
+	logrus.Infof("start heartbeat")
+
 	for{
 		select {
 		case <-ticker.C:
