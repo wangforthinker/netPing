@@ -308,7 +308,7 @@ func (c *IcmpClient) sendAllIcmp(ct *context, id int, seq int) {
 
 		wg.Add(1)
 
-		stopCh := make(chan bool)
+		stopCh := make(chan bool, 1)
 
 		go c.icmpRespThread(readCh, stopCh, seq, id, st)
 		go c.sendIcmp(ct, st.addr, id, seq, stopCh ,wg)

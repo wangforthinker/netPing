@@ -310,7 +310,7 @@ func (c *UdpClient) sendAllUdpPacket(ct *context, id int, seq int) {
 
 		wg.Add(1)
 
-		stopCh := make(chan bool)
+		stopCh := make(chan bool, 1)
 
 		go c.packetRespThread(readCh, stopCh, seq, id, st)
 		go c.sendPacket(ct, conn, st.addr, id, seq, stopCh ,wg)
